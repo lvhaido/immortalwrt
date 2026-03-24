@@ -1,0 +1,50 @@
+name: Build Redmi AX6000
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          repository: immortalwrt/immortalwrt
+          ref: master
+          submodules: recursive
+
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y build-essential ccache flex libncurses5-dev python3
+          sudo chown -R runner:runner .
+
+      - name: Update feeds
+        run: |
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+      - name: Generate config
+        run: |
+          cat > .config << EOF
+          CONFIG_TARGET_mediatek_filogic=y
+          CONFIG_TARGET_mediatek_filogic_DEVICE_redmi_ax6000=y
+          CONFIG_DEVEL=y
+          CONFIG_CCACHE=y
+          EOF
+          make defconfig
+
+      - name: Download
+        run: make download -j8
+
+      - name: Compile
+        run: make -j$(nproc) || make -j1 V=s
+
+      - name: Upload firmware
+        uses: actions/upload-artifact@v4
+        with:
+          name: ax6000-firmware
+          path: bin/targets/mediatek/filogic/*.bin
