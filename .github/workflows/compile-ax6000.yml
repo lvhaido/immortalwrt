@@ -1,0 +1,91 @@
+name: 编译红米AX6000 ImmortalWrt固件
+on:
+  workflow_dispatch:  # 手动触发（推荐，避免自动编译消耗算力）
+  # push:  # 可选：提交代码时自动触发，注释掉先
+
+jobs:
+  compile-firmware:
+    runs-on: ubuntu-22.04  # 兼容ImmortalWrt编译的系统
+    permissions:
+      contents: read
+      actions: write
+      artifacts: write
+
+    steps:
+      # 步骤1：初始化系统环境（安装编译依赖）
+      - name: 配置编译环境
+        run: |
+          sudo rm -rf /etc/apt/sources.list.d/*
+          sudo apt update -y && sudo apt full-upgrade -y
+          sudo apt install -y ack antlr3 asciidoc autoconf automake autopoint binutils bison build-essential \
+            bzip2 ccache clang cmake cpio curl device-tree-compiler ecj fastjar flex gawk gettext gcc-multilib \
+            g++-multilib git gperf haveged help2man intltool lib32gcc-s1 lib32stdc++6 libc6-dev-i386 \
+            libelf-dev libglib2.0-dev libgmp3-dev libltdl-dev libmpc-dev libmpfr-dev libncurses5-dev \
+            libncursesw5-dev libreadline-dev libssl-dev libtool lrzsz mkisofs msmtp nano ninja-build \
+            p7zip p7zip-full patch pkgconf python2.7 python3 python3-pip python3-ply qemu-utils \
+            rsync scons squashfs-tools subversion swig texinfo uglifyjs upx-ucl unzip vim wget xmlto xxd \
+            zlib1g-dev
+          sudo ln -sf /usr/bin/python2.7 /usr/bin/python2
+          sudo timedatectl set-timezone Asia/Shanghai  # 时区修正
+
+      # 步骤2：克隆Fork后的源码仓库
+      - name: 拉取ImmortalWrt源码
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}  # 自动指向你的Fork仓库
+          ref: openwrt-23.05  # 适配AX6000的稳定分支
+          submodules: recursive
+          fetch-depth: 1
+
+      # 步骤3：添加自定义插件（按需修改，示例为常用插件）
+      - name: 安装自定义插件
+        run: |
+          # 插件1：PassWall（科学上网）
+          git clone --depth=1 https://github.com/xiaorouji/openwrt-passwall.git package/passwall
+          # 插件2：OpenClash（科学上网）
+          git clone --depth=1 https://github.com/vernesong/OpenClash.git package/openclash
+          # 插件3：常用工具（可选）
+          git clone --depth=1 https://github.com/immortalwrt/packages.git package/immortalwrt-packages
+          # 如需删除插件，注释对应行即可
+
+      # 步骤4：配置红米AX6000编译参数（核心）
+      - name: 配置编译目标
+        run: |
+          # 加载MT7986默认配置
+          cp target/linux/mediatek/filogic/config-6.1 .config
+          # 指定红米AX6000机型
+          echo "CONFIG_TARGET_mediatek_filogic=y" >> .config
+          echo "CONFIG_TARGET_mediatek_filogic_DEVICE_redmi_ax6000=y" >> .config
+          # 启用插件（和步骤3对应）
+          echo "CONFIG_PACKAGE_luci-app-passwall=y" >> .config
+          echo "CONFIG_PACKAGE_luci-app-openclash=y" >> .config
+          # 启用硬件加速/无线固件（必加）
+          echo "CONFIG_PACKAGE_kmod-mt7986-firmware=y" >> .config
+          echo "CONFIG_PACKAGE_kmod-mtk-wed=y" >> .config
+          # 精简配置（可选）
+          echo "CONFIG_DEVEL=y" >> .config
+          echo "CONFIG_CCACHE=y" >> .config
+          # 生成最终配置
+          make defconfig
+
+      # 步骤5：下载编译依赖包
+      - name: 下载依赖文件
+        run: |
+          make download -j$(nproc)
+          # 清理无效依赖
+          find dl -size -1024c -exec rm -f {} \;
+
+      # 步骤6：编译固件（失败时单线程输出日志）
+      - name: 编译固件
+        run: |
+          make -j$(nproc) || make -j1 V=s
+
+      # 步骤7：上传编译好的固件（保留7天）
+      - name: 上传固件到Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ax6000-immortalwrt-firmware
+          path: |
+            bin/targets/mediatek/filogic/*.bin
+            bin/targets/mediatek/filogic/*.img
+          retention-days: 7
