@@ -6,45 +6,48 @@ jobs:
   build:
     runs-on: ubuntu-22.04
     permissions:
-      contents: write
+      contents: write  # 仅保留这一行，彻底避免重复定义
 
     steps:
-      - name: Checkout
+      - name: Checkout Source Code
         uses: actions/checkout@v4
         with:
           repository: immortalwrt/immortalwrt
           ref: master
           submodules: recursive
 
-      - name: Install dependencies
+      - name: Install Basic Dependencies
         run: |
-          sudo apt update
-          sudo apt install -y build-essential ccache flex libncurses5-dev python3
-          sudo chown -R runner:runner .
+          sudo apt update -y
+          sudo apt install -y build-essential ccache flex bison libncurses5-dev libssl-dev python3
+          sudo chown -R runner:runner $PWD
 
-      - name: Update feeds
+      - name: Update & Install Feeds
         run: |
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      - name: Generate config
+      - name: Generate Redmi AX6000 Config
         run: |
           cat > .config << EOF
           CONFIG_TARGET_mediatek_filogic=y
           CONFIG_TARGET_mediatek_filogic_DEVICE_redmi_ax6000=y
+          CONFIG_PACKAGE_kmod-mt7986-firmware=y
+          CONFIG_PACKAGE_kmod-mtk-wed=y
           CONFIG_DEVEL=y
           CONFIG_CCACHE=y
           EOF
           make defconfig
 
-      - name: Download
-        run: make download -j8
+      - name: Download Compile Dependencies
+        run: make download -j$(nproc)
 
-      - name: Compile
+      - name: Compile Firmware
         run: make -j$(nproc) || make -j1 V=s
 
-      - name: Upload firmware
+      - name: Upload Firmware Artifact
         uses: actions/upload-artifact@v4
         with:
           name: ax6000-firmware
           path: bin/targets/mediatek/filogic/*.bin
+          retention-days: 7
